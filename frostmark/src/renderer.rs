@@ -20,6 +20,7 @@ use super::structs::ChildData;
 mod ruby;
 mod table;
 mod typst;
+pub (crate) mod mermaid;
 
 const COPY_ICON_BYTES: &[u8] = include_bytes!("../../resources/icons/bundled/edit-copy-symbolic.svg");
 
@@ -202,14 +203,10 @@ impl<'a, M: Clone + 'static, T: ValidTheme + 'a> MarkWidget<'a, M, T> {
                     .and_then(|c| c.strip_prefix("language-"))
                     .map(str::to_owned);
 
-                let result = if matches!(
-                    self.current_code_language.as_deref(),
-                    Some("typ") | Some("typst")
-                ) {
-                    let code = extract_text(node);
-                    self.draw_typst(&code)
-                } else {
-                    self.render_children(node, data.insert(ChildDataFlags::MONOSPACE))
+                let result = match self.current_code_language.as_deref() {
+                    Some("typ" | "typst") => self.draw_typst(&extract_text(node)),
+                    Some("mermaid" | "mmd") => self.draw_mermaid(&extract_text(node)),
+                    _ => self.render_children(node, data.insert(ChildDataFlags::MONOSPACE)),
                 };
 
                 self.current_code_language = None;

@@ -26,8 +26,7 @@ async fn embed_local_images(content: &str, base_dir: &Path) -> String {
     let md_re = md_img_re();
     let html_re = html_img_re();
 
-    let mut cache: std::collections::HashMap<String, Option<String>> =
-        std::collections::HashMap::new();
+    let mut cache: HashMap<String, Option<String>> = HashMap::new();
 
     for cap in md_re.captures_iter(content) {
         cache.entry(cap[2].to_string()).or_insert(None);
@@ -66,8 +65,6 @@ async fn embed_local_images(content: &str, base_dir: &Path) -> String {
 }
 
 async fn read_image_as_data_uri(base_dir: &Path, path: &str) -> Option<String> {
-    use base64::{Engine, engine::general_purpose};
-
     let image_path = base_dir.join(path.trim_start_matches("./"));
     if !image_path.exists() {
         return None;
@@ -87,47 +84,77 @@ async fn read_image_as_data_uri(base_dir: &Path, path: &str) -> Option<String> {
     Some(format!("data:{};base64,{}", mime, b64))
 }
 
-fn replace_typst_blocks(content: &str, typst_cache: &HashMap<String, Handle>) -> String {
+enum Special {
+    Typst,
+    Mermaid,
+}
+
+fn escape_html(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for c in input.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Converts the markdown to HTML, replacing typst and mermaid code blocks
+/// with embedded images (or an escaped code block if they can't be rendered).
+fn replace_special_blocks(content: &str, typst_cache: &HashMap<String, Handle>) -> String {
     use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd, html};
 
-    let mut in_typst = false;
-    let mut typst_source = String::new();
-    let mut typst_replacements: Vec<(usize, String)> = Vec::new();
-    let mut typst_index = 0;
+    let mut current: Option<Special> = None;
+    let mut source_buf = String::new();
+    let mut replacements: Vec<String> = Vec::new();
 
     let events: Vec<Event> = Parser::new_ext(content, Options::all())
         .filter_map(|event| match event {
             Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(ref lang)))
-                if matches!(lang.as_ref(), "typst" | "typ") =>
+                if matches!(lang.as_ref(), "typst" | "typ" | "mermaid" | "mmd") =>
             {
-                in_typst = true;
-                typst_source.clear();
+                current = Some(if matches!(lang.as_ref(), "typst" | "typ") {
+                    Special::Typst
+                } else {
+                    Special::Mermaid
+                });
+                source_buf.clear();
                 None
             }
-            Event::Text(ref text) if in_typst => {
-                typst_source.push_str(text);
+            Event::Text(ref text) if current.is_some() => {
+                source_buf.push_str(text);
                 None
             }
-            Event::End(TagEnd::CodeBlock) if in_typst => {
-                in_typst = false;
-                let source = typst_source.trim().to_owned();
-                let placeholder = format!("TYPST_PLACEHOLDER_{}", typst_index);
+            Event::End(TagEnd::CodeBlock) if current.is_some() => {
+                let source = source_buf.trim();
+                let fallback = || format!("<pre><code>{}</code></pre>\n", escape_html(source));
 
-                let replacement = match typst_cache.get(&source) {
-                    Some(handle) => {
-                        let b64 = handle_to_base64_png(handle);
-                        format!(
-                            "<img src=\"data:image/png;base64,{}\" style=\"max-width:100%;height:auto\" />\n",
-                            b64
-                        )
-                    }
-                    None => {
-                        format!("<pre><code>{}</code></pre>\n", source)
+                let replacement = match current.take() {
+                    Some(Special::Typst) => typst_cache
+                        .get(source)
+                        .and_then(handle_to_base64_png)
+                        .map(|b64| {
+                            format!(
+                                "<img src=\"data:image/png;base64,{b64}\" style=\"max-width:100%;height:auto\" />\n"
+                            )
+                        })
+                        .unwrap_or_else(fallback),
+                    _ => match frostmark::render_mermaid_png(source, false, 3.0) {
+                        Ok((bytes, width)) => format!(
+                            "<img src=\"data:image/png;base64,{}\" width=\"{}\" style=\"display:block;margin:1em auto;max-width:100%;height:auto\" />\n",
+                            general_purpose::STANDARD.encode(&bytes),
+                            width.round()
+                        ),
+                        Err(_) => fallback(),
                     },
                 };
 
-                typst_replacements.push((typst_index, replacement));
-                typst_index += 1;
+                let placeholder = format!("SPECIAL_BLOCK_PLACEHOLDER_{}_", replacements.len());
+                replacements.push(replacement);
                 Some(Event::Html(placeholder.into()))
             }
             _ => Some(event),
@@ -137,34 +164,32 @@ fn replace_typst_blocks(content: &str, typst_cache: &HashMap<String, Handle>) ->
     let mut out = String::new();
     html::push_html(&mut out, events.into_iter());
 
-    for (index, replacement) in typst_replacements {
-        let placeholder = format!("TYPST_PLACEHOLDER_{}", index);
-        out = out.replace(&placeholder, &replacement);
+    for (index, replacement) in replacements.iter().enumerate() {
+        out = out.replace(&format!("SPECIAL_BLOCK_PLACEHOLDER_{index}_"), replacement);
     }
 
     out
 }
 
-fn handle_to_base64_png(handle: &Handle) -> String {
-    match handle {
-        Handle::Rgba {
-            width,
-            height,
-            pixels,
-            ..
-        } => {
-            let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
-                ImageBuffer::from_raw(*width, *height, pixels.to_vec())
-                    .expect("Failed to create ImageBuffer");
+fn handle_to_base64_png(handle: &Handle) -> Option<String> {
+    let Handle::Rgba {
+        width,
+        height,
+        pixels,
+        ..
+    } = handle
+    else {
+        return None;
+    };
 
-            let mut png_bytes: Vec<u8> = Vec::new();
-            img.write_to(&mut Cursor::new(&mut png_bytes), image::ImageFormat::Png)
-                .expect("Failed to encode PNG");
+    let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+        ImageBuffer::from_raw(*width, *height, pixels.to_vec())?;
 
-            general_purpose::STANDARD.encode(&png_bytes)
-        }
-        _ => panic!("Expected Rgba handle"),
-    }
+    let mut png_bytes: Vec<u8> = Vec::new();
+    img.write_to(&mut Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+        .ok()?;
+
+    Some(general_purpose::STANDARD.encode(&png_bytes))
 }
 
 pub async fn export_pdf(
@@ -186,7 +211,7 @@ pub async fn export_pdf(
         None => ("Document".to_string(), PathBuf::from(".")),
     };
 
-    let md_html = replace_typst_blocks(&file_content, &typst_cache);
+    let md_html = replace_special_blocks(&file_content, &typst_cache);
     let md_html = embed_local_images(&md_html, &base_dir).await;
 
     let full_html = format!(
