@@ -19,7 +19,7 @@ use super::structs::ChildData;
 
 mod ruby;
 mod table;
-mod typst;
+pub(crate) mod typst;
 pub (crate) mod mermaid;
 
 const COPY_ICON_BYTES: &[u8] = include_bytes!("../../resources/icons/bundled/edit-copy-symbolic.svg");

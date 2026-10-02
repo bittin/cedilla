@@ -1,13 +1,10 @@
 use std::{
     collections::HashMap,
-    io::Cursor,
     path::{Path, PathBuf},
     sync::OnceLock,
 };
 
 use base64::{Engine as _, engine::general_purpose};
-use cosmic::widget::image::Handle;
-use image::{ImageBuffer, Rgba};
 
 // We do this so that we don't have to recompile the regex every time
 static MD_IMG_RE: OnceLock<regex::Regex> = OnceLock::new();
@@ -105,7 +102,7 @@ fn escape_html(input: &str) -> String {
 
 /// Converts the markdown to HTML, replacing typst and mermaid code blocks
 /// with embedded images (or an escaped code block if they can't be rendered).
-fn replace_special_blocks(content: &str, typst_cache: &HashMap<String, Handle>) -> String {
+fn replace_special_blocks(content: &str) -> String {
     use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd, html};
 
     let mut current: Option<Special> = None;
@@ -134,15 +131,14 @@ fn replace_special_blocks(content: &str, typst_cache: &HashMap<String, Handle>) 
                 let fallback = || format!("<pre><code>{}</code></pre>\n", escape_html(source));
 
                 let replacement = match current.take() {
-                    Some(Special::Typst) => typst_cache
-                        .get(source)
-                        .and_then(handle_to_base64_png)
-                        .map(|b64| {
-                            format!(
-                                "<img src=\"data:image/png;base64,{b64}\" style=\"max-width:100%;height:auto\" />\n"
-                            )
-                        })
-                        .unwrap_or_else(fallback),
+                    // 12pt matches the browser's default body text. 6 px/pt is about 430 dpi.
+                    Some(Special::Typst) => match frostmark::render_typst_png(source, 12.0, 6.0) {
+                        Some((bytes, width_pt)) => format!(
+                            "<img src=\"data:image/png;base64,{}\" style=\"display:block;margin:0.5em auto;width:{width_pt:.1}pt;max-width:100%;height:auto\" />\n",
+                            general_purpose::STANDARD.encode(&bytes)
+                        ),
+                        None => fallback(),
+                    },
                     _ => match frostmark::render_mermaid_png(source, false, 3.0) {
                         Ok((bytes, width)) => format!(
                             "<img src=\"data:image/png;base64,{}\" width=\"{}\" style=\"display:block;margin:1em auto;max-width:100%;height:auto\" />\n",
@@ -171,33 +167,11 @@ fn replace_special_blocks(content: &str, typst_cache: &HashMap<String, Handle>) 
     out
 }
 
-fn handle_to_base64_png(handle: &Handle) -> Option<String> {
-    let Handle::Rgba {
-        width,
-        height,
-        pixels,
-        ..
-    } = handle
-    else {
-        return None;
-    };
-
-    let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
-        ImageBuffer::from_raw(*width, *height, pixels.to_vec())?;
-
-    let mut png_bytes: Vec<u8> = Vec::new();
-    img.write_to(&mut Cursor::new(&mut png_bytes), image::ImageFormat::Png)
-        .ok()?;
-
-    Some(general_purpose::STANDARD.encode(&png_bytes))
-}
-
 pub async fn export_pdf(
     client: gotenberg_pdf::Client,
     file_path: Option<PathBuf>,
     file_content: String,
     file_destination_path: String,
-    typst_cache: HashMap<String, Handle>,
 ) -> Result<(), anywho::Error> {
     let (title, base_dir) = match &file_path {
         Some(path) => {
@@ -211,7 +185,7 @@ pub async fn export_pdf(
         None => ("Document".to_string(), PathBuf::from(".")),
     };
 
-    let md_html = replace_special_blocks(&file_content, &typst_cache);
+    let md_html = replace_special_blocks(&file_content);
     let md_html = embed_local_images(&md_html, &base_dir).await;
 
     let full_html = format!(

@@ -133,6 +133,7 @@ pub struct MarkWidget<'a, Message, Theme = cosmic::iced::Theme> {
     pub(crate) current_code_language: Option<String>,
     pub(crate) code_highlight_theme: cosmic::iced::highlighter::Theme,
 
+    pub(crate) current_typst_id: usize,
     pub(crate) current_mermaid_id: usize,
 }
 
@@ -159,6 +160,7 @@ impl<'a, M: 'a, T: 'a> MarkWidget<'a, M, T> {
             ruby_mode: RubyMode::default(),
             current_code_language: None,
             code_highlight_theme: cosmic::iced::highlighter::Theme::InspiredGitHub,
+            current_typst_id: 0,
             current_mermaid_id: 0,
         }
     }
