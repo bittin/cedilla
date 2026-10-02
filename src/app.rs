@@ -573,6 +573,10 @@ impl cosmic::Application for AppModel {
                         //store parent directory of selected file
                         //self.selected_nav_path = path.parent().map(|p| p.to_path_buf());
 
+                        if editor.path.as_ref() == Some(&path) {
+                            return Task::none();
+                        }
+
                         if editor.is_dirty {
                             if editor.needs_confirmation() {
                                 Task::done(cosmic::action::app(Message::DialogAction(
