@@ -15,3 +15,6 @@ mod widgets;
 pub use state::MarkState;
 pub use structs::{ImageInfo, MarkWidget, RubyMode, UpdateMsg};
 pub use style::Style;
+
+// not very clean but the easies way to get pdf export working for mermaid too
+pub use renderer::mermaid::render_mermaid_png;
