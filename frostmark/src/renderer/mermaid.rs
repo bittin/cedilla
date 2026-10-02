@@ -147,7 +147,7 @@ pub fn render_mermaid_png(
     let policy = SvgOutputPolicy {
         preset: SvgPipelinePreset::ResvgSafe,
         css_override_policy: CssOverridePolicy::StripExistingImportant,
-        root_background_color: Some(l.canvas.to_string()),
+        root_background_color: Some("transparent".to_string()),
         ..SvgOutputPolicy::default()
     };
 
