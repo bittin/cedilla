@@ -10,6 +10,7 @@ use crate::app::{
 use crate::config::BoolState;
 use cosmic::iced::widget::scrollable::scroll_to;
 use cosmic::prelude::*;
+use cosmic::widget::text_editor::{Cursor, Position};
 use widgets::text_editor;
 
 impl AppModel {
@@ -183,6 +184,53 @@ impl AppModel {
         Task::none()
     }
 
+    pub fn handle_toggle_checkbox(
+        &mut self,
+        index: usize,
+        checked: bool,
+    ) -> Task<cosmic::Action<Message>> {
+        let State::Ready {
+            editor, preview, ..
+        } = &mut self.state
+        else {
+            return Task::none();
+        };
+
+        let text = editor.content.text();
+        let Some((line, column)) = find_task_marker(&text, index) else {
+            return Task::none();
+        };
+
+        let cursor_before = editor.content.cursor().position;
+
+        // select the single character between the brackets and replace it
+        editor.content.move_to(Cursor {
+            position: Position {
+                line,
+                column: column + 1,
+            },
+            selection: Some(Position { line, column }),
+        });
+        editor
+            .content
+            .perform(text_editor::Action::Edit(text_editor::Edit::Paste(
+                std::sync::Arc::new(if checked { "x" } else { " " }.to_string()),
+            )));
+
+        // put the cursor back where the user had it
+        editor.content.move_to(Cursor {
+            position: cursor_before,
+            selection: None,
+        });
+
+        editor.is_dirty = true;
+        editor.push_history((cursor_before.line, cursor_before.column));
+
+        preview.update_content(editor.content.text().as_ref());
+
+        Task::none()
+    }
+
     pub fn handle_undo(&mut self) -> Task<cosmic::Action<Message>> {
         let State::Ready {
             editor, preview, ..
@@ -341,4 +389,76 @@ fn ensure_cursor_visible(
     }
 
     editor_task
+}
+
+/// Finds the nth task list marker (`- [ ]`, `* [x]`, `1. [ ]`...) in the text,
+/// skipping fenced code blocks. Returns the line and the column (in chars) of
+/// the character between the brackets.
+fn find_task_marker(text: &str, index: usize) -> Option<(usize, usize)> {
+    let mut in_fence = false;
+    let mut count = 0;
+
+    for (line_number, line) in text.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+
+        if let Some(column) = task_marker_column(line) {
+            if count == index {
+                return Some((line_number, column));
+            }
+            count += 1;
+        }
+    }
+
+    None
+}
+
+/// If the line is a task list item, returns the column (in chars) of the
+/// character between the brackets.
+fn task_marker_column(line: &str) -> Option<usize> {
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0;
+
+    // indentation and blockquote markers
+    while i < chars.len() && matches!(chars[i], ' ' | '\t' | '>') {
+        i += 1;
+    }
+
+    // bullet (-, *, +) or ordered marker (1. or 1))
+    if i < chars.len() && matches!(chars[i], '-' | '*' | '+') {
+        i += 1;
+    } else {
+        let start = i;
+        while i < chars.len() && chars[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == start || i >= chars.len() || !matches!(chars[i], '.' | ')') {
+            return None;
+        }
+        i += 1;
+    }
+
+    // at least one space after the marker
+    let start = i;
+    while i < chars.len() && matches!(chars[i], ' ' | '\t') {
+        i += 1;
+    }
+    if i == start {
+        return None;
+    }
+
+    // [ ], [x] or [X], followed by whitespace or the end of the line
+    let is_task = i + 2 < chars.len()
+        && chars[i] == '['
+        && matches!(chars[i + 1], ' ' | 'x' | 'X')
+        && chars[i + 2] == ']'
+        && chars.get(i + 3).is_none_or(|c| c.is_whitespace());
+
+    is_task.then_some(i + 1)
 }

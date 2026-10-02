@@ -87,6 +87,7 @@ type FClickLink<M> = Box<dyn Fn(String) -> M>;
 type FCopyCode<M> = Arc<dyn Fn(String) -> M>;
 type FDrawImage<'a, M, T> = Box<dyn Fn(ImageInfo) -> Element<'static, M, T> + 'a>;
 type FUpdate<M> = Arc<dyn Fn(UpdateMsg) -> M>;
+type FToggleCheckbox<M> = Arc<dyn Fn(usize, bool) -> M>;
 pub(crate) type FStyleLinkButton<T> =
     Arc<dyn Fn(&T, widget::button::Status) -> widget::button::Style + 'static>;
 
@@ -135,6 +136,9 @@ pub struct MarkWidget<'a, Message, Theme = cosmic::iced::Theme> {
 
     pub(crate) current_typst_id: usize,
     pub(crate) current_mermaid_id: usize,
+
+    pub(crate) current_checkbox_id: usize,
+    pub(crate) fn_toggling_checkbox: Option<FToggleCheckbox<Message>>,
 }
 
 impl<'a, M: 'a, T: 'a> MarkWidget<'a, M, T> {
@@ -162,6 +166,8 @@ impl<'a, M: 'a, T: 'a> MarkWidget<'a, M, T> {
             code_highlight_theme: cosmic::iced::highlighter::Theme::InspiredGitHub,
             current_typst_id: 0,
             current_mermaid_id: 0,
+            current_checkbox_id: 0,
+            fn_toggling_checkbox: None,
         }
     }
 
@@ -397,6 +403,17 @@ impl<'a, M: 'a, T: 'a> MarkWidget<'a, M, T> {
     #[must_use]
     pub fn code_highlight_theme(mut self, theme: cosmic::iced::highlighter::Theme) -> Self {
         self.code_highlight_theme = theme;
+        self
+    }
+
+    /// When the user clicks a checkbox (for example in a task list).
+    ///
+    /// The closure receives the index of the checkbox in the document
+    /// (0 for the first one, in document order) and its new value.
+    /// The app is responsible for applying the change to its source text.
+    #[must_use]
+    pub fn on_toggling_checkbox(mut self, f: impl Fn(usize, bool) -> M + 'static) -> Self {
+        self.fn_toggling_checkbox = Some(Arc::new(f));
         self
     }
 }
