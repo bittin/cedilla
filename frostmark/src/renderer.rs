@@ -233,7 +233,19 @@ impl<'a, M: Clone + 'static, T: ValidTheme + 'a> MarkWidget<'a, M, T> {
             "input" => match get_attr(&attrs, "type").unwrap_or("text") {
                 "checkbox" => {
                     let checked = attrs.iter().any(|attr| &*attr.name.local == "checked");
-                    widget::checkbox(checked).into()
+                    let id = self.current_checkbox_id;
+                    self.current_checkbox_id += 1;
+
+                    let mut checkbox = widget::checkbox(checked);
+                    if let Some(on_toggle) = self.fn_toggling_checkbox.clone() {
+                        checkbox = checkbox.on_toggle(move |value| on_toggle(id, value));
+                    }
+
+                    let line_height = self.text_size * 1.4;
+                    widget::row![checkbox.size(self.text_size)]
+                        .height(line_height)
+                        .align_y(cosmic::iced::Alignment::Center)
+                        .into()
                 }
                 kind => RenderedSpan::Spans(vec![
                     widget::span(format!("<input type={kind} (TODO)>")).font(Font {
@@ -271,12 +283,16 @@ impl<'a, M: Clone + 'static, T: ValidTheme + 'a> MarkWidget<'a, M, T> {
                 };
                 let size = self.text_size * (1.0 + ((scaling - 1.0) * self.heading_scale));
 
-                let bullet = if let Some(num) = data.li_ordered_number {
-                    widget::text!("{num}. ").size(size)
+                if is_task_item(node) {
+                    self.render_children(node, data).render().into()
                 } else {
-                    widget::text("- ").size(size)
-                };
-                widget::row![bullet, self.render_children(node, data).render()].into()
+                    let bullet = if let Some(num) = data.li_ordered_number {
+                        widget::text!("{num}. ").size(size)
+                    } else {
+                        widget::text("- ").size(size)
+                    };
+                    widget::row![bullet, self.render_children(node, data).render()].into()
+                }
             }
 
             "ruby" => self.draw_ruby(node, data),
@@ -705,6 +721,24 @@ impl<'a, M: Clone + 'static, T: ValidTheme + 'a> From<MarkWidget<'a, M, T>> for 
     fn from(mut value: MarkWidget<'a, M, T>) -> Self {
         let node = &value.state.dom.document;
         value.traverse_node(node, ChildData::default()).render()
+    }
+}
+
+/// Whether this `<li>` is a task list item, i.e. starts with a checkbox
+/// (directly, or inside its first paragraph for loose lists).
+fn is_task_item(node: &Node) -> bool {
+    let children = node.children.borrow();
+    let Some(first) = children.iter().find(|n| !is_node_useless(n)) else {
+        return false;
+    };
+    let NodeData::Element { name, attrs, .. } = &first.data else {
+        return false;
+    };
+
+    match &*name.local {
+        "input" => get_attr(&attrs.borrow(), "type") == Some("checkbox"),
+        "p" => is_task_item(first),
+        _ => false,
     }
 }
 

@@ -193,6 +193,8 @@ pub enum Message {
     Search(SearchAction),
     /// Smart paste (pastes images as Markdown or standard text)
     SmartPaste,
+    /// A checkbox in the preview was clicked (index in the document, new value)
+    ToggleCheckbox(usize, bool),
 
     /// Update the HTML renderer state
     UpdateMarkState(UpdateMsg),
@@ -763,6 +765,7 @@ impl cosmic::Application for AppModel {
             Message::Redo => self.handle_redo(),
             Message::Search(action) => self.handle_search(action),
             Message::SmartPaste => self.handle_smart_paste(),
+            Message::ToggleCheckbox(index, value) => self.handle_toggle_checkbox(index, value),
 
             // Preview / Pane
             Message::UpdateMarkState(msg) => self.handle_update_mark_state(msg),
@@ -1124,6 +1127,7 @@ fn cedilla_main_view<'a>(
                             .on_updating_state(Message::UpdateMarkState)
                             .on_clicking_link(Message::LaunchUrl)
                             .on_copying_code(Message::CopyToClipboard)
+                            .on_toggling_checkbox(Message::ToggleCheckbox)
                             .font(font)
                             .text_size(app_config.text_size)
                             .code_highlight_theme(highlighter_theme)
