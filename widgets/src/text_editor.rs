@@ -70,6 +70,10 @@ use std::{fmt, ops};
 
 pub use text::editor::{Action, Edit, Motion};
 
+/// Extra lines highlighted past the bottom of the visible area, so that
+/// scrolling doesn't reveal unhighlighted text.
+const HIGHLIGHT_LOOKAHEAD_LINES: usize = 50;
+
 /// The identifier of a [`TextEditor`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Id(widget::Id);
@@ -474,13 +478,20 @@ where
 
     /// Returns the text of the [`Content`].
     pub fn text(&self) -> String {
+        // Borrows once and appends each line directly, instead of going
+        // through `lines()` (which allocates a new `String` per line).
+        let internal = self.0.borrow();
+        let count = internal.editor.line_count();
         let mut contents = String::new();
-        let mut lines = self.lines().peekable();
 
-        while let Some(line) = lines.next() {
+        for index in 0..count {
+            let Some(line) = internal.editor.line(index) else {
+                break;
+            };
+
             contents.push_str(&line.text);
 
-            if lines.peek().is_some() {
+            if index + 1 < count {
                 contents.push_str(if line.ending == LineEnding::None {
                     LineEnding::default().as_str()
                 } else {
@@ -551,6 +562,80 @@ where
     }
 }
 
+/// Wraps a highlighter so that it only processes lines up to `limit`.
+///
+/// A [`TextEditor`] with `Shrink` height inside a scrollable is as tall as its
+/// whole text, so every line counts as visible and each edit would re-highlight
+/// everything from the edited line to the end. This wrapper skips the lines
+/// past the visible area cheaply and picks them up later, once the viewport
+/// reaches them.
+#[derive(Debug)]
+struct Lazy<H> {
+    inner: H,
+    /// Index of the last line worth highlighting right now.
+    limit: usize,
+    /// Lines the editor fed us that were skipped since `inner` stopped.
+    skipped: usize,
+}
+
+impl<H: text::Highlighter> Lazy<H> {
+    /// Sets the new limit, resuming where `inner` stopped if the viewport
+    /// has reached the skipped lines.
+    fn set_limit(&mut self, limit: usize) {
+        self.limit = limit;
+
+        if self.skipped > 0 && self.inner.current_line() <= limit {
+            self.skipped = 0;
+        }
+    }
+}
+
+impl<H: text::Highlighter> text::Highlighter for Lazy<H> {
+    type Settings = H::Settings;
+    type Highlight = H::Highlight;
+    type Iterator<'a>
+        = std::iter::Flatten<std::option::IntoIter<H::Iterator<'a>>>
+    where
+        Self: 'a;
+
+    fn new(settings: &Self::Settings) -> Self {
+        Self {
+            inner: H::new(settings),
+            limit: usize::MAX,
+            skipped: 0,
+        }
+    }
+
+    fn update(&mut self, new_settings: &Self::Settings) {
+        self.inner.update(new_settings);
+        self.skipped = 0;
+    }
+
+    fn change_line(&mut self, line: usize) {
+        // A change below the point where `inner` stopped doesn't invalidate
+        // anything it has already processed, so it stays where it is.
+        if !(self.skipped > 0 && line >= self.inner.current_line()) {
+            self.inner.change_line(line);
+        }
+
+        self.skipped = 0;
+    }
+
+    fn highlight_line(&mut self, line: &str) -> Self::Iterator<'_> {
+        if self.skipped > 0 || self.inner.current_line() > self.limit {
+            self.skipped += 1;
+
+            None.into_iter().flatten()
+        } else {
+            Some(self.inner.highlight_line(line)).into_iter().flatten()
+        }
+    }
+
+    fn current_line(&self) -> usize {
+        self.inner.current_line() + self.skipped
+    }
+}
+
 /// The state of a [`TextEditor`].
 #[derive(Debug)]
 pub struct State<Highlighter: text::Highlighter> {
@@ -564,7 +649,7 @@ pub struct State<Highlighter: text::Highlighter> {
     /// Remembers the last commit so the echoed duplicate can be dropped.
     last_commit: Option<(String, Instant)>,
     last_theme: RefCell<Option<String>>,
-    highlighter: RefCell<Highlighter>,
+    highlighter: RefCell<Lazy<Highlighter>>,
     highlighter_settings: Highlighter::Settings,
     highlighter_format_address: usize,
 }
@@ -637,7 +722,9 @@ where
             partial_scroll: 0.0,
             last_commit: None,
             last_theme: RefCell::default(),
-            highlighter: RefCell::new(Highlighter::new(&self.highlighter_settings)),
+            highlighter: RefCell::new(<Lazy<Highlighter> as text::Highlighter>::new(
+                &self.highlighter_settings,
+            )),
             highlighter_settings: self.highlighter_settings.clone(),
             highlighter_format_address: self.highlighter_format as usize,
         })
@@ -972,7 +1059,7 @@ where
         _defaults: &renderer::Style,
         layout: Layout<'_>,
         _cursor: mouse::Cursor,
-        _viewport: &Rectangle,
+        viewport: &Rectangle,
     ) {
         let bounds = layout.bounds();
 
@@ -991,6 +1078,25 @@ where
         {
             state.highlighter.borrow_mut().change_line(0);
             let _ = state.last_theme.borrow_mut().replace(theme_name.to_owned());
+        }
+
+        // Only highlight down to the bottom of the visible area (plus some
+        // lookahead), instead of the whole text.
+        {
+            let line_height = f32::from(
+                self.line_height
+                    .to_absolute(self.text_size.unwrap_or_else(|| renderer.default_size())),
+            );
+            let text_top = bounds.y + self.padding.top;
+            let visible_bottom = (viewport.y + viewport.height - text_top).max(0.0);
+
+            let limit = if line_height > 0.0 {
+                (visible_bottom / line_height).ceil() as usize + HIGHLIGHT_LOOKAHEAD_LINES
+            } else {
+                usize::MAX
+            };
+
+            state.highlighter.borrow_mut().set_limit(limit);
         }
 
         internal.editor.highlight(
