@@ -43,6 +43,14 @@ The app has some support for [Typst](https://typst.app/) inside `code` blocks. T
 <div align="center">
     <img src="./resources/screenshots/typst-light.png" width=750>
 </div>
+
+## Mermaid Support
+
+The app has support for [Mermaid](https://mermaid.js.org/intro/) Diagrams inside `code` blocks. You can add Mermaid Diagrams using `mmd` or `mermaid` as the languge attribut inside a `code` block. Mermaid Diagrams support in Cedilla is powered by the awesome [merman](https://github.com/Latias94/merman) crate!
+
+<div align="center">
+    <img src="./resources/screenshots/mermaid-light.png" width=750>
+</div>
     
 ## Attribution
 

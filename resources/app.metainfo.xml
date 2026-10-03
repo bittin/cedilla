@@ -98,6 +98,18 @@
       <caption>Typst Support (Dark)</caption>
       <caption xml:lang="cs">Podpora Typst (Tmavý režim)</caption>
     </screenshot>
+    <screenshot>
+      <image>
+        https://raw.githubusercontent.com/mariinkys/cedilla/main/resources/screenshots/mermaid-light.png</image>
+      <caption>Mermaid Support (Light)</caption>
+      <caption xml:lang="cs">Podpora Mermaid (Světlý režim)</caption>
+    </screenshot>
+    <screenshot>
+      <image>
+        https://raw.githubusercontent.com/mariinkys/cedilla/main/resources/screenshots/mermaid-dark.png</image>
+      <caption>Mermaid Support (Dark)</caption>
+      <caption xml:lang="cs">Podpora Mermaid (Tmavý režim)</caption>
+    </screenshot>
   </screenshots>
 
   <branding>
@@ -142,6 +154,16 @@
   </keywords>
 
   <releases>
+    <release version="0.1.13" date="2026-10-03">
+        <description>
+            <p>Added Mermaid Diagrams support</p>
+            <p>Added interactive checkbox support to the preview pane</p>
+            <p>Fixed issue that triggered save confirmation dialog when it shouldn't</p>
+            <p>Improved performance on documents with large codeblocks</p>
+            <p>Refactored Typst support approach</p>
+            <p>Updated dependencies</p>
+        </description>
+    </release>
     <release version="0.1.12" date="2026-09-19">
         <description>
             <p>Updated dependencies</p>
