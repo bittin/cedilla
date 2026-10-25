@@ -59,8 +59,8 @@ i18n-embed = { version = "0.16", features = [
     "desktop-requester",
 ] }
 i18n-embed-fl = "0.10"
-open = "5.4.2"
-rust-embed = "8.11.0"
+open = "5.4.5"
+rust-embed = "8.13.0"
 
 # Added by me
 serde = { version = "1.0.229", features = ["derive"] }
@@ -68,23 +68,23 @@ tokio = { version = "1.53.1", features = ["fs"] }
 anywho = "0.1.2"
 dirs = "7.0.0"
 ignore = "0.4.33"
-icu_collator = { version = "2.3.1", features = ["compiled_data"] }
-icu_locale = { version = "2.3.1", features = ["compiled_data"] }
+icu_collator = { version = "2.4.0", features = ["compiled_data"] }
+icu_locale = { version = "2.4.0", features = ["compiled_data"] }
 slotmap = "1.1.1"
 percent-encoding = "2.3.2"
-reqwest = { version = "0.13.4", default-features = false, features = ["rustls"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 url = "2.5.8"
 base64 = "0.23.1"
 regex = "1.13.1"
-pulldown-cmark = "0.13.4"
+pulldown-cmark = "0.13.5"
 dissimilar = "1.0.11"
 gotenberg_pdf = { version = "0.6.0" }
 font-kit = "0.14.3"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 grep = "0.4.1"
-notify = "8.2.0"
-arboard = { version = "3.6.1", features = ["wayland-data-control"] }
-jiff = "0.2"
+notify = "8.2.1"
+arboard = { version = "3.7.0", features = ["wayland-data-control"] }
+jiff = "0.2.38"
 
 [workspace.dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
